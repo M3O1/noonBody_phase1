@@ -1,8 +1,10 @@
 from tkinter import *
 from PIL import Image, ImageTk
+import os
 import cv2
 import time
 import threading
+import numpy as np
 from threading import Thread
 from datetime import datetime
 
@@ -18,8 +20,8 @@ HEIGHT = int(2436 * RATIO)
 # Video 프레임 재생 주기(1ms)
 FPS = 3
 
-# counter 크기
-COUNTER = 5
+# 사진 찍기 까지의 delay 시간
+SHUTTER_LAG = 3
 
 # Button 크기
 BUTTON_RATIO = 75
@@ -46,8 +48,11 @@ class Application(Frame):
     def __init__(self, master):
         self.master = master
 
-        self.counter = COUNTER
+        self.counter = SHUTTER_LAG  # 사진 찍기 까지의 delay 시간
         self.counter_thread = None
+
+        self.toggle_save = False
+        self.shutter_effect = 0
         self.set_window()
 
     def set_window(self):
@@ -61,16 +66,17 @@ class Application(Frame):
 
         # set the video
         self.set_video()
-        self.show_frame()
 
         # set Shutter button
         self.set_iphone_button()
         # set the border of iphone
         self.set_iphone_round_border(100)
 
+        self.show_frame()
         self.master.minsize(width=WIDTH,height=HEIGHT)
 
     def set_video(self):
+        # 카메라의 출력 부분을 설정해주는 함수
         self.widget = Label(self.canvas)
         self.widget.pack()
         self.canvas.create_window(225,500,window=self.widget)
@@ -80,6 +86,8 @@ class Application(Frame):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2*HEIGHT)
 
     def show_frame(self):
+        # 카메라의 frame 출력 처리에 대한 pipeline
+        # 카메라의 filter 설정 등은 여기서 이루어져야 함
         _, frame = self.cap.read()
 
         frame = frame[:,200:440,:]
@@ -87,23 +95,36 @@ class Application(Frame):
         frame = self.preprocess_image(frame)
 
         frame = cv2.flip(frame, 1)
-        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         cv2image = self.postprocess_image(cv2image)
         img = Image.fromarray(cv2image)
         imgtk = ImageTk.PhotoImage(image=img)
         self.widget.image = imgtk
         self.widget.configure(image=imgtk)
-        self.canvas.after(FPS, self.show_frame)
+
+        self.canvas.after(FPS, self.show_frame) # application이 FPS만큼 후 다시 self.show_frame을 실행
 
     def preprocess_image(self,frame):
+        # 영상 품질 보정을 해주는 부분
         return cv2.GaussianBlur(frame,(5,5),0)
 
     def postprocess_image(self, frame):
+        # shutter가 동작하였으면 그 이미지를 body 폴더에 담는 코드
+        if self.toggle_save:
+            self.save_image(frame)
+            self.toggle_save = False
+            self.shutter_effect = 100
+
+        # shutter 효과 (찍었을 때 반짝하는 것)
+        if self.shutter_effect > 0:
+            frame = self.apply_shutter_effect(frame)
+            self.shutter_effect -= 10
+
         return frame
 
     def set_iphone_round_border(self, radius=100):
-        global WIDTH, HEIGHT
+        # 아이폰처럼 화면 내 border을 둥글게 나오도록 세팅
         points = [0+radius, 0, 0+radius, 0, WIDTH-radius, 0, WIDTH-radius, 0,
           WIDTH, 0, WIDTH, 0+radius, WIDTH, 0+radius, WIDTH, HEIGHT-radius,
           WIDTH, HEIGHT-radius, WIDTH, HEIGHT, WIDTH-radius, HEIGHT,
@@ -137,34 +158,46 @@ class Application(Frame):
         image = Image.open(path)
         return ImageTk.PhotoImage(image.resize((BUTTON_RATIO,BUTTON_RATIO), Image.ANTIALIAS))
 
+    def save_image(self, frame):
+        filename = datetime.now().strftime("%y%m%d_%H%M%S") + ".png"
+        filepath = os.path.join(PICTURE_DIR, filename)
+        cv2.imwrite(filepath, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+    def apply_shutter_effect(self, frame):
+        brightness = self.shutter_effect * np.ones_like(frame)
+        brightness[:,:,1] = 1.5 * brightness[:,:,1]
+        brightness[:,:,2] = 1.2 * brightness[:,:,2]
+        return cv2.add(frame,brightness)
+
     def press_shutter_btn(self, event=None):
         self.shutter_btn.config(image=self.image_down)
         if self.counter_thread is None:
-            self.counter_thread = CounterThread(COUNTER, self.canvas)
+            self.counter_thread = CounterThread(SHUTTER_LAG, self)
         elif not self.counter_thread.is_alive():
-            self.counter_thread = CounterThread(COUNTER, self.canvas)
+            self.counter_thread = CounterThread(SHUTTER_LAG, self)
 
     def release_shutter_btn(self, event=None):
         self.shutter_btn.config(image=self.image_up)
         if self.counter_thread.is_alive():
-            self.counter_thread.set_counter(COUNTER)
+            self.counter_thread.set_counter(SHUTTER_LAG)
         else:
             self.counter_thread.start()
 
 class CounterThread(Thread):
     # 화면에 카운트다운을 출력하는 함수
-    def __init__(self, counter, canvas):
+    def __init__(self, counter, app):
         Thread.__init__(self)
         self.counter = counter
-        self.canvas = canvas
+        self.app = app
 
     def run(self):
-        text = self.canvas.create_text(50,30,fill="white",font="Times 40 bold", text=str(self.counter),tags=('counter',))
+        text = app.canvas.create_text(50,30,fill="white",font="Times 40 bold", text=str(self.counter),tags=('counter',))
         while self.counter > 0:
             time.sleep(1)
             self.counter -= 1
-            self.canvas.itemconfigure(text, text=str(self.counter))
-        self.canvas.delete('counter')
+            app.canvas.itemconfigure(text, text=str(self.counter))
+        app.canvas.delete('counter')
+        self.app.toggle_save = True
 
     def set_counter(self, counter):
         self.counter = counter
