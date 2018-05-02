@@ -18,8 +18,11 @@ WIDTH = int(1125 * RATIO)
 HEIGHT = int(2436 * RATIO)
 RADIUS = 100 # 곡선 형태
 
+CAM_WIDTH = 430
+CAM_HEIGHT = 860
+
 # Video 프레임 재생 주기(1ms)
-FPS = 3
+FPS = 1
 
 # 사진 찍기 까지의 delay 시간
 SHUTTER_LAG = 3
@@ -45,6 +48,18 @@ def threaded(fn):
         return thread
     return wrapper
 
+def memoize(func):
+    cache = {}
+
+    def memoizer(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+
+    return memoizer
+
+
 class Application(Frame):
     def __init__(self, master):
         self.master = master
@@ -55,19 +70,37 @@ class Application(Frame):
 
         self.toggle_save = False # 이미지를 저장할 것인가 유무
         self.shutter_effect = 0
+
+        self.vignette_xs, self.vignette_xc = 0.8, 1.2
+        self.vignette_ys, self.vignette_yc = 0.8, 1.2
+        self.update_vignette_filter()
+
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+
+        self.gamma_value = 0.8
+        self.update_gamma_lut()
+
+        self.red_weight = 1.2
+        self.green_weight = 1.0
+        self.blue_weight = 0.8
+        self.update_color_lut()
+
         self.set_window()
+        self.bind_key_to_frame()
+
 
     def set_window(self):
         # application 화면 구성을 정하는 메소드
         self.master.title(APPLICATION_TITLE)
 
-        self.set_menu()
+        #self.set_menu()
         self.set_video()
+        self.set_board()
         self.set_iphone_button()
         self.set_iphone_round_border()
 
         self.show_frame() # 무한 루프로 계속 canvas에 frame을 노출시킴
-        self.master.minsize(width=WIDTH,height=HEIGHT)
+        self.master.minsize(width=WIDTH+300,height=HEIGHT)
 
     def set_menu(self):
         # application menubar을 정하는 메소드
@@ -77,6 +110,7 @@ class Application(Frame):
         filtermenu.add_command(label="original")
         filtermenu.add_command(label="Gray")
         filtermenu.add_command(label="vignette") # Vignette effect
+        filtermenu.add_command(label="contrast") # Vignette effect
 
         filtermenu.add_separator()
         self.menubar.add_cascade(label="filter",menu=filtermenu)
@@ -89,13 +123,113 @@ class Application(Frame):
 
         self.master.config(menu=self.menubar)
 
+    def set_board(self):
+        self.frame = Frame(self.master,width=300,height=500)
+        self.frame.grid(row=0,column=1,sticky='ne')
+
+        row_idx = 0
+
+        # Gray 이미지로 변환
+        Label(self.frame, text="GRAY < - > RGB").grid(row=row_idx,column=0,pady=10,sticky='w')
+
+        self.check_gray = IntVar()
+        self.gray_button = Checkbutton(self.frame, text='GRAY', variable=self.check_gray)
+        self.gray_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        # vignette 필터 효과
+        row_idx += 1
+        Label(self.frame, text="Vignette filter").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.check_vignette = IntVar()
+        self.vignette_button = Checkbutton(self.frame, text='Vignette', variable=self.check_vignette)
+        self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="  수직 side weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.vignette_ys_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_ys_scale.set(self.vignette_ys)
+        self.vignette_ys_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.frame, text="  수직 center weight").grid(row=row_idx,column=0,pady=3,sticky='w')
+        self.vignette_yc_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_yc_scale.set(self.vignette_yc)
+        self.vignette_yc_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.frame, text="  수평 side weight").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.vignette_xs_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_xs_scale.set(self.vignette_xs)
+        self.vignette_xs_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.frame, text="  수평 center weight").grid(row=row_idx,column=0,pady=3,sticky='w')
+        self.vignette_xc_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_xc_scale.set(self.vignette_xc)
+        self.vignette_xc_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        # contrast 강화 효과
+        row_idx += 1
+        Label(self.frame, text="contrast(clahe)").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.check_clahe = IntVar()
+        self.clahe_button = Checkbutton(self.frame, text='apply', variable=self.check_clahe)
+        self.clahe_button.grid(row=row_idx, column=1, sticky='E',pady=10)
+
+        # 명도 보정 효과
+        row_idx += 1
+        Label(self.frame, text="명도 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.check_gamma = IntVar()
+        self.gamma_button = Checkbutton(self.frame, text='gamma correction', variable=self.check_gamma)
+        self.gamma_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="gamma value").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.gamma_scale = Scale(self.frame, from_=0.3,to=2.0, orient=HORIZONTAL,resolution=0.1)
+        self.gamma_scale.set(self.gamma_value)
+        self.gamma_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        # 색조 보정 효과
+        row_idx += 1
+        Label(self.frame, text="색조 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.check_color = IntVar()
+        self.vignette_button = Checkbutton(self.frame, text='apply', variable=self.check_color)
+        self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="  red weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.red_weight_scale = Scale(self.frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
+        self.red_weight_scale.set(self.red_weight)
+        self.red_weight_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.frame, text="  green weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.green_weight_scale = Scale(self.frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
+        self.green_weight_scale.set(self.green_weight)
+        self.green_weight_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.frame, text="  blue weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.blue_weight_scale = Scale(self.frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
+        self.blue_weight_scale.set(self.blue_weight)
+        self.blue_weight_scale.grid(row=row_idx,column=1,sticky="ew")
+
+
+    def bind_key_to_frame(self):
+        self.vignette_ys_scale.configure(command=self.convert_vignette_ys)
+        self.vignette_yc_scale.configure(command=self.convert_vignette_yc)
+        self.vignette_xs_scale.configure(command=self.convert_vignette_xs)
+        self.vignette_xc_scale.configure(command=self.convert_vignette_xc)
+        self.gamma_scale.configure(command=self.convert_gamma)
+        self.red_weight_scale.configure(command=self.convert_red_weight)
+        self.green_weight_scale.configure(command=self.convert_green_weight)
+        self.blue_weight_scale.configure(command=self.convert_blue_weight)
+
     def set_video(self):
         # 카메라의 출력 부분을 설정해주는 함수
         self.canvas = Canvas(self.master,
             bg="white",
             height=HEIGHT,
             width=WIDTH)
-        self.canvas.pack()
+        self.canvas.grid(row=0,column=0)
 
         self.widget = Label(self.canvas)
         self.widget.pack()
@@ -142,14 +276,15 @@ class Application(Frame):
         _, frame = self.cap.read()
 
         frame = frame[:,200:440,:]
-        frame = cv2.resize(frame,(430,860))
+        frame = cv2.resize(frame,(CAM_WIDTH,CAM_HEIGHT))
         frame = self.preprocess_image(frame)
 
         frame = cv2.flip(frame, 1)
         cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        cv2image = self.shutter_image(cv2image)
         cv2image = self.postprocess_image(cv2image)
+        cv2image = self.shutter_image(cv2image)
+
         img = Image.fromarray(cv2image)
         imgtk = ImageTk.PhotoImage(image=img)
         self.widget.image = imgtk
@@ -175,6 +310,28 @@ class Application(Frame):
         return frame
 
     def postprocess_image(self,frame):
+        if self.check_vignette.get() == 1:
+            # vignette 필터 적용
+            frame =np.uint8(np.clip(frame*self.vignette_mask, 0, 250))
+
+        if self.check_clahe.get() == 1:
+            # clahe 필터 적용
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB)
+            frame[:,:,0] = self.clahe.apply(frame[:,:,0])
+            frame = cv2.cvtColor(frame, cv2.COLOR_LAB2RGB)
+
+        if self.check_gamma.get() == 1:
+            # 명도 보정 필터 적용
+            frame = cv2.LUT(frame, self.gamma_lut)
+
+        if self.check_color.get() == 1:
+            # 색감 보정 필터 적용
+            frame = cv2.LUT(frame, self.color_lut)
+
+        if self.check_gray.get() == 1:
+            # 흑백으로 변경
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
         return frame
 
     def read_image(self,path):
@@ -204,6 +361,65 @@ class Application(Frame):
         else:
             self.counter_thread.start()
 
+    def convert_vignette_ys(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.vignette_ys = float(event)
+            self.update_vignette_filter()
+
+    def convert_vignette_yc(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.vignette_yc = float(event)
+            self.update_vignette_filter()
+
+    def convert_vignette_xs(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.vignette_xs = float(event)
+            self.update_vignette_filter()
+
+    def convert_vignette_xc(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.vignette_xc = float(event)
+            self.update_vignette_filter()
+
+    def convert_gamma(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.gamma_value = float(event)
+            self.update_gamma_lut()
+
+    def convert_red_weight(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.red_weight = float(event)
+            self.update_color_lut()
+
+    def convert_green_weight(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.green_weight = float(event)
+            self.update_color_lut()
+
+    def convert_blue_weight(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.blue_weight = float(event)
+            self.update_color_lut()
+
+    def update_vignette_filter(self):
+        self.vignette_mask = create_vignette_mask(CAM_WIDTH,CAM_HEIGHT,self.vignette_xs, self.vignette_xc, self.vignette_ys, self.vignette_yc)
+
+    def update_gamma_lut(self):
+        self.gamma_lut = create_lut(self.gamma_value)
+
+    def update_color_lut(self):
+        self.color_lut = create_lut([self.red_weight,self.green_weight,self.blue_weight])
+
+
+
 class CounterThread(Thread):
     # 화면에 카운트다운을 출력하는 함수
     def __init__(self, counter, app):
@@ -222,6 +438,41 @@ class CounterThread(Thread):
 
     def set_counter(self, counter):
         self.counter = counter
+
+'''
+vignette filter를 구성하는 메소드
+'''
+def create_vignette_mask(width, height,
+                        side_width, center_width,
+                        side_height, center_height):
+    f_x = vignette_func(width, side_width, center_width)
+    f_y = vignette_func(height, side_height, center_height)
+
+    vignette_mask = (np.vstack([f_x(np.arange(0,width))]*height)*np.vstack([f_y(np.arange(0,height))]*width).T)
+    return np.expand_dims(vignette_mask,axis=-1)
+
+def vignette_func(n, min_d, max_d):
+    return np.vectorize(lambda x : -(max_d-min_d)/((n//2)**2)*x*(x-n+1)+min_d)
+
+
+'''
+명도와 색조를 변경하는 메소드
+'''
+@memoize
+def create_lut(weights):
+    if isinstance(weights, (int,float)):
+        inv_w = 1.0 / weights
+        lut = np.array([((i / 255.0) ** inv_w) * 255
+            for i in np.arange(0, 256)]).astype("uint8")
+        return lut
+    else:
+        luts = []
+        for weight in weights:
+            inv_w = 1.0 / weight
+            luts.append(np.array([((i / 255.0) ** inv_w) * 255
+                for i in np.arange(0, 256)]).astype("uint8"))
+        lut = np.dstack(luts)
+        return lut
 
 if __name__ == "__main__":
     root = Tk()
