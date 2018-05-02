@@ -47,6 +47,7 @@ def threaded(fn):
 class Application(Frame):
     def __init__(self, master):
         self.master = master
+        self.canvas = None # 카메라 화면이 들어가는 부분
 
         self.counter = SHUTTER_LAG  # 사진 찍기 까지의 delay 시간
         self.counter_thread = None
@@ -57,12 +58,8 @@ class Application(Frame):
 
     def set_window(self):
         self.master.title(APPLICATION_TITLE)
-
-        self.canvas = Canvas(self.master,
-            bg="white",
-            height=HEIGHT,
-            width=WIDTH)
-        self.canvas.pack()
+        # set menu_bar
+        self.set_menu()
 
         # set the video
         self.set_video()
@@ -75,8 +72,31 @@ class Application(Frame):
         self.show_frame()
         self.master.minsize(width=WIDTH,height=HEIGHT)
 
+    def set_menu(self):
+        self.menubar = Menu(self.master)
+
+        filtermenu = Menu(self.menubar, tearoff=0)
+        filtermenu.add_command(label="Gray")
+        filtermenu.add_command(label="clahe")
+        filtermenu.add_separator()
+        self.menubar.add_cascade(label="filter",menu=filtermenu)
+
+        outlinemenu = Menu(self.menubar, tearoff=0)
+        outlinemenu.add_command(label="transparent")
+        outlinemenu.add_command(label="bold outline")
+        outlinemenu.add_separator()
+        self.menubar.add_cascade(label="outline",menu=outlinemenu)
+
+        self.master.config(menu=self.menubar)
+
     def set_video(self):
         # 카메라의 출력 부분을 설정해주는 함수
+        self.canvas = Canvas(self.master,
+            bg="white",
+            height=HEIGHT,
+            width=WIDTH)
+        self.canvas.pack()
+
         self.widget = Label(self.canvas)
         self.widget.pack()
         self.canvas.create_window(225,500,window=self.widget)
