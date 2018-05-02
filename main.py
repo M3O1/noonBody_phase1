@@ -16,6 +16,7 @@ IPHONE_COLOR = "#{:2X}{:2X}{:2X}".format(R,G,B)
 RATIO = 0.4
 WIDTH = int(1125 * RATIO)
 HEIGHT = int(2436 * RATIO)
+RADIUS = 100 # 곡선 형태
 
 # Video 프레임 재생 주기(1ms)
 FPS = 3
@@ -29,7 +30,7 @@ BTN_UP_PATH = "./source/button_up.png"
 BTN_DOWN_PATH = "./source/button_down.png"
 
 # output 저장 위치
-PICTURE_DIR = "./body/" # 이미지 저장 폴더
+PICTURE_DIR = "./body/"
 
 # 프로그램 상단에 뜰 제목
 APPLICATION_TITLE = 'noonBody'
@@ -50,26 +51,21 @@ class Application(Frame):
         self.canvas = None # 카메라 화면이 들어가는 부분
 
         self.counter = SHUTTER_LAG  # 사진 찍기 까지의 delay 시간
-        self.counter_thread = None
+        self.counter_thread = None # 사진 찍기 전 counter를 노출하는 thread
 
-        self.toggle_save = False
+        self.toggle_save = False # 이미지를 저장할 것인가 유무
         self.shutter_effect = 0
         self.set_window()
 
     def set_window(self):
         self.master.title(APPLICATION_TITLE)
-        # set menu_bar
+
         self.set_menu()
-
-        # set the video
         self.set_video()
-
-        # set Shutter button
         self.set_iphone_button()
-        # set the border of iphone
-        self.set_iphone_round_border(100)
+        self.set_iphone_round_border()
 
-        self.show_frame()
+        self.show_frame() # 무한 루프로 계속 canvas에 frame을 노출시킴
         self.master.minsize(width=WIDTH,height=HEIGHT)
 
     def set_menu(self):
@@ -134,22 +130,22 @@ class Application(Frame):
         if self.toggle_save:
             self.save_image(frame)
             self.toggle_save = False
-            self.shutter_effect = 100
+            self.shutter_effect = 255
 
         # shutter 효과 (찍었을 때 반짝하는 것)
         if self.shutter_effect > 0:
-            frame = self.apply_shutter_effect(frame)
-            self.shutter_effect -= 10
+            frame = self.apply_shutter_effect(frame,self.shutter_effect)
+            self.shutter_effect -= 40
 
         return frame
 
-    def set_iphone_round_border(self, radius=100):
+    def set_iphone_round_border(self):
         # 아이폰처럼 화면 내 border을 둥글게 나오도록 세팅
-        points = [0+radius, 0, 0+radius, 0, WIDTH-radius, 0, WIDTH-radius, 0,
-          WIDTH, 0, WIDTH, 0+radius, WIDTH, 0+radius, WIDTH, HEIGHT-radius,
-          WIDTH, HEIGHT-radius, WIDTH, HEIGHT, WIDTH-radius, HEIGHT,
-          WIDTH-radius, HEIGHT, 0+radius, HEIGHT, 0+radius, HEIGHT,
-          0, HEIGHT, 0, HEIGHT-radius, 0, HEIGHT-radius, 0, 0+radius, 0, 0+radius, 0, 0]
+        points = [0+RADIUS, 0, 0+RADIUS, 0, WIDTH-RADIUS, 0, WIDTH-RADIUS, 0,
+          WIDTH, 0, WIDTH, 0+RADIUS, WIDTH, 0+RADIUS, WIDTH, HEIGHT-RADIUS,
+          WIDTH, HEIGHT-RADIUS, WIDTH, HEIGHT, WIDTH-RADIUS, HEIGHT,
+          WIDTH-RADIUS, HEIGHT, 0+RADIUS, HEIGHT, 0+RADIUS, HEIGHT,
+          0, HEIGHT, 0, HEIGHT-RADIUS, 0, HEIGHT-RADIUS, 0, 0+RADIUS, 0, 0+RADIUS, 0, 0]
 
         self.canvas.create_polygon(points,
             fill=IPHONE_COLOR,
@@ -183,11 +179,9 @@ class Application(Frame):
         filepath = os.path.join(PICTURE_DIR, filename)
         cv2.imwrite(filepath, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
-    def apply_shutter_effect(self, frame):
-        brightness = self.shutter_effect * np.ones_like(frame)
-        brightness[:,:,1] = 1.5 * brightness[:,:,1]
-        brightness[:,:,2] = 1.2 * brightness[:,:,2]
-        return cv2.add(frame,brightness)
+    def apply_shutter_effect(self, frame, shutter_effect):
+        frame[frame<shutter_effect] = shutter_effect
+        return frame
 
     def press_shutter_btn(self, event=None):
         self.shutter_btn.config(image=self.image_down)
@@ -224,7 +218,6 @@ class CounterThread(Thread):
 
 if __name__ == "__main__":
     root = Tk()
-
     app = Application(root)
     root.bind("<Escape>", lambda e : root.quit())
     root.mainloop()
