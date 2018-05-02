@@ -58,6 +58,7 @@ class Application(Frame):
         self.set_window()
 
     def set_window(self):
+        # application 화면 구성을 정하는 메소드
         self.master.title(APPLICATION_TITLE)
 
         self.set_menu()
@@ -69,11 +70,14 @@ class Application(Frame):
         self.master.minsize(width=WIDTH,height=HEIGHT)
 
     def set_menu(self):
+        # application menubar을 정하는 메소드
         self.menubar = Menu(self.master)
 
         filtermenu = Menu(self.menubar, tearoff=0)
+        filtermenu.add_command(label="original")
         filtermenu.add_command(label="Gray")
-        filtermenu.add_command(label="clahe")
+        filtermenu.add_command(label="vignette") # Vignette effect
+
         filtermenu.add_separator()
         self.menubar.add_cascade(label="filter",menu=filtermenu)
 
@@ -100,44 +104,6 @@ class Application(Frame):
         self.cap = cv2.VideoCapture(0)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2*HEIGHT)
-
-    def show_frame(self):
-        # 카메라의 frame 출력 처리에 대한 pipeline
-        # 카메라의 filter 설정 등은 여기서 이루어져야 함
-        _, frame = self.cap.read()
-
-        frame = frame[:,200:440,:]
-        frame = cv2.resize(frame,(430,860))
-        frame = self.preprocess_image(frame)
-
-        frame = cv2.flip(frame, 1)
-        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        cv2image = self.postprocess_image(cv2image)
-        img = Image.fromarray(cv2image)
-        imgtk = ImageTk.PhotoImage(image=img)
-        self.widget.image = imgtk
-        self.widget.configure(image=imgtk)
-
-        self.canvas.after(FPS, self.show_frame) # application이 FPS만큼 후 다시 self.show_frame을 실행
-
-    def preprocess_image(self,frame):
-        # 영상 품질 보정을 해주는 부분
-        return cv2.GaussianBlur(frame,(5,5),0)
-
-    def postprocess_image(self, frame):
-        # shutter가 동작하였으면 그 이미지를 body 폴더에 담는 코드
-        if self.toggle_save:
-            self.save_image(frame)
-            self.toggle_save = False
-            self.shutter_effect = 255
-
-        # shutter 효과 (찍었을 때 반짝하는 것)
-        if self.shutter_effect > 0:
-            frame = self.apply_shutter_effect(frame,self.shutter_effect)
-            self.shutter_effect -= 40
-
-        return frame
 
     def set_iphone_round_border(self):
         # 아이폰처럼 화면 내 border을 둥글게 나오도록 세팅
@@ -169,6 +135,47 @@ class Application(Frame):
                                   overrelief=FLAT)
 
         self.canvas.create_window(WIDTH//2,HEIGHT-100, window=self.shutter_btn)
+
+    def show_frame(self):
+        # 카메라의 frame 출력 처리에 대한 pipeline
+        # 카메라의 filter 설정 등은 여기서 이루어져야 함
+        _, frame = self.cap.read()
+
+        frame = frame[:,200:440,:]
+        frame = cv2.resize(frame,(430,860))
+        frame = self.preprocess_image(frame)
+
+        frame = cv2.flip(frame, 1)
+        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        cv2image = self.shutter_image(cv2image)
+        cv2image = self.postprocess_image(cv2image)
+        img = Image.fromarray(cv2image)
+        imgtk = ImageTk.PhotoImage(image=img)
+        self.widget.image = imgtk
+        self.widget.configure(image=imgtk)
+
+        self.canvas.after(FPS, self.show_frame) # application이 FPS만큼 후 다시 self.show_frame을 실행
+
+    def preprocess_image(self,frame):
+        # 영상 품질 보정을 해주는 부분
+        return cv2.GaussianBlur(frame,(5,5),0)
+
+    def shutter_image(self,frame):
+        # shutter가 동작하였으면 그 이미지를 body 폴더에 담는 코드
+        if self.toggle_save:
+            self.save_image(frame)
+            self.toggle_save = False
+            self.shutter_effect = 255
+
+        # shutter 효과 (찍었을 때 반짝하는 것)
+        if self.shutter_effect > 0:
+            frame = self.apply_shutter_effect(frame,self.shutter_effect)
+            self.shutter_effect -= 40
+        return frame
+
+    def postprocess_image(self,frame):
+        return frame
 
     def read_image(self,path):
         image = Image.open(path)
