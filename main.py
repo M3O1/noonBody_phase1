@@ -38,28 +38,6 @@ PICTURE_DIR = "./body/"
 # 프로그램 상단에 뜰 제목
 APPLICATION_TITLE = 'noonBody'
 
-def threaded(fn):
-    '''
-    Thread로 background에서 동작하도록 만들어주는 함수
-    '''
-    def wrapper(*args, **kwargs):
-        thread = Thread(target=fn, args=args, kwargs=kwargs)
-        thread.start()
-        return thread
-    return wrapper
-
-def memoize(func):
-    cache = {}
-
-    def memoizer(*args, **kwargs):
-        key = str(args) + str(kwargs)
-        if key not in cache:
-            cache[key] = func(*args, **kwargs)
-        return cache[key]
-
-    return memoizer
-
-
 class Application(Frame):
     def __init__(self, master):
         self.master = master
@@ -71,29 +49,33 @@ class Application(Frame):
         self.toggle_save = False # 이미지를 저장할 것인가 유무
         self.shutter_effect = 0
 
-        self.vignette_xs, self.vignette_xc = 0.8, 1.2
-        self.vignette_ys, self.vignette_yc = 0.8, 1.2
+        self.check_gray = IntVar()
+
+        self.check_vignette = IntVar()
+        self.vignette_xs, self.vignette_xc = 0.8, 1.2 # xs -> x축 side 강도 / xc -> x축 center 강도
+        self.vignette_ys, self.vignette_yc = 0.8, 1.2 # ys -> y축 side 강도 / yc -> y축 center 강도
         self.update_vignette_filter()
 
+        self.check_clahe = IntVar()
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
 
+        self.check_gamma = IntVar()
         self.gamma_value = 0.8
         self.update_gamma_lut()
 
-        self.red_weight = 1.2
-        self.green_weight = 1.0
-        self.blue_weight = 0.8
+        self.check_color = IntVar()
+        self.red_weight = 1.2   # red channel에 대한 gamma 가중치
+        self.green_weight = 1.0 # green channel에 대한 gamma 가중치
+        self.blue_weight = 0.8  # blue channel에 대한 gamma 가중치
         self.update_color_lut()
 
         self.set_window()
         self.bind_key_to_frame()
 
-
     def set_window(self):
         # application 화면 구성을 정하는 메소드
         self.master.title(APPLICATION_TITLE)
 
-        #self.set_menu()
         self.set_video()
         self.set_board()
         self.set_iphone_button()
@@ -101,27 +83,6 @@ class Application(Frame):
 
         self.show_frame() # 무한 루프로 계속 canvas에 frame을 노출시킴
         self.master.minsize(width=WIDTH+300,height=HEIGHT)
-
-    def set_menu(self):
-        # application menubar을 정하는 메소드
-        self.menubar = Menu(self.master)
-
-        filtermenu = Menu(self.menubar, tearoff=0)
-        filtermenu.add_command(label="original")
-        filtermenu.add_command(label="Gray")
-        filtermenu.add_command(label="vignette") # Vignette effect
-        filtermenu.add_command(label="contrast") # Vignette effect
-
-        filtermenu.add_separator()
-        self.menubar.add_cascade(label="filter",menu=filtermenu)
-
-        outlinemenu = Menu(self.menubar, tearoff=0)
-        outlinemenu.add_command(label="transparent")
-        outlinemenu.add_command(label="bold outline")
-        outlinemenu.add_separator()
-        self.menubar.add_cascade(label="outline",menu=outlinemenu)
-
-        self.master.config(menu=self.menubar)
 
     def set_board(self):
         self.frame = Frame(self.master,width=300,height=500)
@@ -131,15 +92,12 @@ class Application(Frame):
 
         # Gray 이미지로 변환
         Label(self.frame, text="GRAY < - > RGB").grid(row=row_idx,column=0,pady=10,sticky='w')
-
-        self.check_gray = IntVar()
         self.gray_button = Checkbutton(self.frame, text='GRAY', variable=self.check_gray)
         self.gray_button.grid(row=row_idx, column=1, sticky='E',pady=5)
 
         # vignette 필터 효과
         row_idx += 1
         Label(self.frame, text="Vignette filter").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.check_vignette = IntVar()
         self.vignette_button = Checkbutton(self.frame, text='Vignette', variable=self.check_vignette)
         self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
 
@@ -170,14 +128,12 @@ class Application(Frame):
         # contrast 강화 효과
         row_idx += 1
         Label(self.frame, text="contrast(clahe)").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.check_clahe = IntVar()
         self.clahe_button = Checkbutton(self.frame, text='apply', variable=self.check_clahe)
         self.clahe_button.grid(row=row_idx, column=1, sticky='E',pady=10)
 
         # 명도 보정 효과
         row_idx += 1
         Label(self.frame, text="명도 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.check_gamma = IntVar()
         self.gamma_button = Checkbutton(self.frame, text='gamma correction', variable=self.check_gamma)
         self.gamma_button.grid(row=row_idx, column=1, sticky='E',pady=5)
 
@@ -190,7 +146,6 @@ class Application(Frame):
         # 색조 보정 효과
         row_idx += 1
         Label(self.frame, text="색조 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.check_color = IntVar()
         self.vignette_button = Checkbutton(self.frame, text='apply', variable=self.check_color)
         self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
 
@@ -212,8 +167,8 @@ class Application(Frame):
         self.blue_weight_scale.set(self.blue_weight)
         self.blue_weight_scale.grid(row=row_idx,column=1,sticky="ew")
 
-
     def bind_key_to_frame(self):
+        # component와 event handler를 bind하는 메소드
         self.vignette_ys_scale.configure(command=self.convert_vignette_ys)
         self.vignette_yc_scale.configure(command=self.convert_vignette_yc)
         self.vignette_xs_scale.configure(command=self.convert_vignette_xs)
@@ -310,6 +265,7 @@ class Application(Frame):
         return frame
 
     def postprocess_image(self,frame):
+        # 필터 처리를 담당하는 메소드
         if self.check_vignette.get() == 1:
             # vignette 필터 적용
             frame =np.uint8(np.clip(frame*self.vignette_mask, 0, 250))
@@ -418,7 +374,36 @@ class Application(Frame):
     def update_color_lut(self):
         self.color_lut = create_lut([self.red_weight,self.green_weight,self.blue_weight])
 
+'''
+Helper
+    1. decorator
+        - threaded : 메소드를 background thread로 동작하도록 만드는 함수
+        - memoize  : cache를 이용하여 반복 연산하지 않도록 도와주는 함수
 
+    2. class
+        - CounterThread : 화면에 카운트다운을 출력하도록 도와주는 클래스. Thread를 이용하여 background 연산함
+
+    3. method
+        - create_vignette_mask & vignette_func : vignette filter(hightlight 강조)하는 함수
+        - create_lut : Look-Up Table을 생성하는 함수
+'''
+def threaded(fn):
+    def wrapper(*args, **kwargs):
+        thread = Thread(target=fn, args=args, kwargs=kwargs)
+        thread.start()
+        return thread
+    return wrapper
+
+def memoize(func):
+    cache = {}
+
+    def memoizer(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+
+    return memoizer
 
 class CounterThread(Thread):
     # 화면에 카운트다운을 출력하는 함수
@@ -439,9 +424,6 @@ class CounterThread(Thread):
     def set_counter(self, counter):
         self.counter = counter
 
-'''
-vignette filter를 구성하는 메소드
-'''
 def create_vignette_mask(width, height,
                         side_width, center_width,
                         side_height, center_height):
@@ -454,10 +436,6 @@ def create_vignette_mask(width, height,
 def vignette_func(n, min_d, max_d):
     return np.vectorize(lambda x : -(max_d-min_d)/((n//2)**2)*x*(x-n+1)+min_d)
 
-
-'''
-명도와 색조를 변경하는 메소드
-'''
 @memoize
 def create_lut(weights):
     if isinstance(weights, (int,float)):
