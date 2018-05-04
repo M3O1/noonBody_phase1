@@ -51,6 +51,7 @@ class Application(Frame):
         self.shutter_effect = 0
 
         self.check_mask = IntVar()
+        self.mask_image = None
         self.check_blend_type = StringVar()
         self.filename_text = StringVar()
         self.blend_ratio = 0.1
@@ -318,11 +319,14 @@ class Application(Frame):
         if self.check_gray.get() == 1:
             # 흑백으로 변경
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
 
         return frame
 
     def apply_mask(self, frame):
         # 마스크 적용하기
+        if self.mask_image is None:
+            return frame
         if self.check_mask.get() == 1:
             if self.check_blend_type.get() == "합치기":
                 frame = cv2.add(frame, self.mask_image)
