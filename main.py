@@ -1,4 +1,5 @@
 from tkinter import *
+from tkinter import filedialog
 from PIL import Image, ImageTk
 import os
 import cv2
@@ -49,6 +50,11 @@ class Application(Frame):
         self.toggle_save = False # 이미지를 저장할 것인가 유무
         self.shutter_effect = 0
 
+        self.check_mask = IntVar()
+        self.check_blend_type = StringVar()
+        self.filename_text = StringVar()
+        self.blend_ratio = 0.1
+
         self.check_gray = IntVar()
 
         self.check_vignette = IntVar()
@@ -90,7 +96,34 @@ class Application(Frame):
 
         row_idx = 0
 
+        # filename show
+        row_idx += 1
+        Label(self.frame, text="mask 적용 유무 :").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.mask_button = Checkbutton(self.frame, text='apply', variable=self.check_mask)
+        self.mask_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="mask 적용 방식 :").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.mask_option = OptionMenu(self.frame, self.check_blend_type, "합치기", "블렌드하기")
+        self.check_blend_type.set("합치기")
+        self.mask_option.grid(row=row_idx, column=1, sticky="E",pady=5)
+
+        #블렌드 비율
+        row_idx += 1
+        Label(self.frame, text="blend ratio").grid(row=row_idx,column=0,pady=3,sticky='w')
+        self.blend_scale = Scale(self.frame, from_=0.0,to=1.0, orient=HORIZONTAL,resolution=0.1)
+        self.blend_scale.set(self.blend_ratio)
+        self.blend_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        self.file_mask_btn = Button(self.frame, text="mask image",width=30,height=2)
+        self.file_mask_btn.grid(row=row_idx,column=0,columnspan=2,sticky="nwe",pady=5)
+        row_idx+=1
+        self.preview_imagebox = Label(self.frame,height=20,width=20,background='black')
+        self.preview_imagebox.grid(row=row_idx,column=0,columnspan=2,sticky="ew",pady=5)
+
         # Gray 이미지로 변환
+        row_idx += 1
         Label(self.frame, text="GRAY < - > RGB").grid(row=row_idx,column=0,pady=10,sticky='w')
         self.gray_button = Checkbutton(self.frame, text='GRAY', variable=self.check_gray)
         self.gray_button.grid(row=row_idx, column=1, sticky='E',pady=5)
@@ -169,6 +202,8 @@ class Application(Frame):
 
     def bind_key_to_frame(self):
         # component와 event handler를 bind하는 메소드
+        self.file_mask_btn.configure(command=self.select_mask_file)
+        self.blend_scale.configure(command=self.convert_blend_ratio)
         self.vignette_ys_scale.configure(command=self.convert_vignette_ys)
         self.vignette_yc_scale.configure(command=self.convert_vignette_yc)
         self.vignette_xs_scale.configure(command=self.convert_vignette_xs)
@@ -230,39 +265,35 @@ class Application(Frame):
         # 카메라의 filter 설정 등은 여기서 이루어져야 함
         _, frame = self.cap.read()
 
-        frame = frame[:,200:440,:]
-        frame = cv2.resize(frame,(CAM_WIDTH,CAM_HEIGHT))
-        frame = self.preprocess_image(frame)
+        frame = self.adjust_frame(frame) # 영상을 올바른 형태로 변환
+        frame = self.preprocess_image(frame) # 영상 품질 보정
+        frame = self.postprocess_image(frame) # 영상에 필터 적용
+        frame = self.apply_mask(frame) # 영상에 마스크 적용
 
-        frame = cv2.flip(frame, 1)
-        cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        cv2image = self.postprocess_image(cv2image)
-        cv2image = self.shutter_image(cv2image)
-
-        img = Image.fromarray(cv2image)
-        imgtk = ImageTk.PhotoImage(image=img)
-        self.widget.image = imgtk
-        self.widget.configure(image=imgtk)
+        frame = self.shutter_image(frame) # 영상 저장할 경우, 찰칵 효과 + 저장
+        self.print_to_canvas(frame) # 영상을 canvas에 올리기
 
         self.canvas.after(FPS, self.show_frame) # application이 FPS만큼 후 다시 self.show_frame을 실행
+
+    def show_preview_image(self):
+        # 현재 cv_image의 original image를 보여줌
+        if self.mask_image is not None:
+            preview_image = cv2.resize(self.mask_image,(150,300))
+            self.preview_image = ImageTk.PhotoImage(Image.fromarray(preview_image))
+            self.preview_imagebox.configure(image=self.preview_image,height=300,width=30)
+            self.preview_imagebox.image = self.preview_image
+
+    def adjust_frame(self,frame):
+        # frame의 size, direction, color을 보정
+        frame = cv2.flip(frame, 1)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = frame[:,200:440,:]
+        frame = cv2.resize(frame,(CAM_WIDTH,CAM_HEIGHT))
+        return frame
 
     def preprocess_image(self,frame):
         # 영상 품질 보정을 해주는 부분
         return cv2.GaussianBlur(frame,(5,5),0)
-
-    def shutter_image(self,frame):
-        # shutter가 동작하였으면 그 이미지를 body 폴더에 담는 코드
-        if self.toggle_save:
-            self.save_image(frame)
-            self.toggle_save = False
-            self.shutter_effect = 255
-
-        # shutter 효과 (찍었을 때 반짝하는 것)
-        if self.shutter_effect > 0:
-            frame = self.apply_shutter_effect(frame,self.shutter_effect)
-            self.shutter_effect -= 40
-        return frame
 
     def postprocess_image(self,frame):
         # 필터 처리를 담당하는 메소드
@@ -290,6 +321,34 @@ class Application(Frame):
 
         return frame
 
+    def apply_mask(self, frame):
+        # 마스크 적용하기
+        if self.check_mask.get() == 1:
+            if self.check_blend_type.get() == "합치기":
+                frame = cv2.add(frame, self.mask_image)
+            else:
+                frame = cv2.addWeighted(frame, (1-self.blend_ratio), self.mask_image, self.blend_ratio, 0)
+        return frame
+
+    def shutter_image(self,frame):
+        # shutter가 동작하였으면 그 이미지를 body 폴더에 담는 코드
+        if self.toggle_save:
+            self.save_image(frame)
+            self.toggle_save = False
+            self.shutter_effect = 255
+
+        # shutter 효과 (찍었을 때 반짝하는 것)
+        if self.shutter_effect > 0:
+            frame = self.apply_shutter_effect(frame,self.shutter_effect)
+            self.shutter_effect -= 40
+        return frame
+
+    def print_to_canvas(self,frame):
+        img = Image.fromarray(frame)
+        imgtk = ImageTk.PhotoImage(image=img)
+        self.widget.image = imgtk
+        self.widget.configure(image=imgtk)
+
     def read_image(self,path):
         image = Image.open(path)
         return ImageTk.PhotoImage(image.resize((BUTTON_RATIO,BUTTON_RATIO), Image.ANTIALIAS))
@@ -302,6 +361,17 @@ class Application(Frame):
     def apply_shutter_effect(self, frame, shutter_effect):
         frame[frame<shutter_effect] = shutter_effect
         return frame
+
+    def select_mask_file(self, event=None):
+        # 적용할 마스크가 있는 이미지를 선택
+        self.mask_path = filedialog.askopenfilename()
+        if self.mask_path == "" or self.mask_path is None:
+            return
+        self.mask_image = cv2.imread(self.mask_path)
+        self.mask_image = cv2.cvtColor(self.mask_image, cv2.COLOR_BGR2RGB)
+        self.mask_image = cv2.resize(self.mask_image, (CAM_WIDTH,CAM_HEIGHT))
+
+        self.show_preview_image()
 
     def press_shutter_btn(self, event=None):
         self.shutter_btn.config(image=self.image_down)
@@ -316,6 +386,11 @@ class Application(Frame):
             self.counter_thread.set_counter(SHUTTER_LAG)
         else:
             self.counter_thread.start()
+
+    def convert_blend_ratio(self,event):
+        re_num = re.compile("^\d*(\.?\d*)$")
+        if re_num.match(str(event)):
+            self.blend_ratio = float(event)
 
     def convert_vignette_ys(self,event):
         re_num = re.compile("^\d*(\.?\d*)$")
