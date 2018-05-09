@@ -51,13 +51,21 @@ class Application(Frame):
         self.shutter_effect = 0
 
         self.check_mask = IntVar()
+        self.check_mask.set(1)
         self.mask_image = None
         self.check_blend_type = StringVar()
+        self.check_mask_type = StringVar()
         self.filename_text = StringVar()
         self.blend_ratio = 0.1
 
-        self.check_gray = IntVar()
+        self.check_outfocus_bg = IntVar()
+        self.outfocus_blur = (31,31) # outfocus를 위한 blur의 ksize
+        self.check_dark_bg = IntVar()
+        self.background_lut = create_lut(0.5)
+        self.check_grid = IntVar()
+        self.grid_mask = self.get_grid_mask()
 
+        self.check_gray = IntVar()
         self.check_vignette = IntVar()
         self.vignette_xs, self.vignette_xc = 0.8, 1.2 # xs -> x축 side 강도 / xc -> x축 center 강도
         self.vignette_ys, self.vignette_yc = 0.8, 1.2 # ys -> y축 side 강도 / yc -> y축 center 강도
@@ -89,130 +97,7 @@ class Application(Frame):
         self.set_iphone_round_border()
 
         self.show_frame() # 무한 루프로 계속 canvas에 frame을 노출시킴
-        self.master.minsize(width=WIDTH+300,height=HEIGHT)
-
-    def set_board(self):
-        self.frame = Frame(self.master,width=300,height=500)
-        self.frame.grid(row=0,column=1,sticky='ne')
-
-        row_idx = 0
-
-        # filename show
-        row_idx += 1
-        Label(self.frame, text="mask 적용 유무 :").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.mask_button = Checkbutton(self.frame, text='apply', variable=self.check_mask)
-        self.mask_button.grid(row=row_idx, column=1, sticky='E',pady=5)
-
-        row_idx += 1
-        Label(self.frame, text="mask 적용 방식 :").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.mask_option = OptionMenu(self.frame, self.check_blend_type, "합치기", "블렌드하기")
-        self.check_blend_type.set("합치기")
-        self.mask_option.grid(row=row_idx, column=1, sticky="E",pady=5)
-
-        #블렌드 비율
-        row_idx += 1
-        Label(self.frame, text="blend ratio").grid(row=row_idx,column=0,pady=3,sticky='w')
-        self.blend_scale = Scale(self.frame, from_=0.0,to=1.0, orient=HORIZONTAL,resolution=0.1)
-        self.blend_scale.set(self.blend_ratio)
-        self.blend_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        row_idx += 1
-        self.file_mask_btn = Button(self.frame, text="mask image",width=30,height=2)
-        self.file_mask_btn.grid(row=row_idx,column=0,columnspan=2,sticky="nwe",pady=5)
-        row_idx+=1
-        self.preview_imagebox = Label(self.frame,height=20,width=20,background='black')
-        self.preview_imagebox.grid(row=row_idx,column=0,columnspan=2,sticky="ew",pady=5)
-
-        # Gray 이미지로 변환
-        row_idx += 1
-        Label(self.frame, text="GRAY < - > RGB").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.gray_button = Checkbutton(self.frame, text='GRAY', variable=self.check_gray)
-        self.gray_button.grid(row=row_idx, column=1, sticky='E',pady=5)
-
-        # vignette 필터 효과
-        row_idx += 1
-        Label(self.frame, text="Vignette filter").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.vignette_button = Checkbutton(self.frame, text='Vignette', variable=self.check_vignette)
-        self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
-
-        row_idx += 1
-        Label(self.frame, text="  수직 side weight").grid(row=row_idx,column=0,pady=3,sticky=S)
-        self.vignette_ys_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
-        self.vignette_ys_scale.set(self.vignette_ys)
-        self.vignette_ys_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        row_idx += 1
-        Label(self.frame, text="  수직 center weight").grid(row=row_idx,column=0,pady=3,sticky='w')
-        self.vignette_yc_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
-        self.vignette_yc_scale.set(self.vignette_yc)
-        self.vignette_yc_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        row_idx += 1
-        Label(self.frame, text="  수평 side weight").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.vignette_xs_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
-        self.vignette_xs_scale.set(self.vignette_xs)
-        self.vignette_xs_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        row_idx += 1
-        Label(self.frame, text="  수평 center weight").grid(row=row_idx,column=0,pady=3,sticky='w')
-        self.vignette_xc_scale = Scale(self.frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
-        self.vignette_xc_scale.set(self.vignette_xc)
-        self.vignette_xc_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        # contrast 강화 효과
-        row_idx += 1
-        Label(self.frame, text="contrast(clahe)").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.clahe_button = Checkbutton(self.frame, text='apply', variable=self.check_clahe)
-        self.clahe_button.grid(row=row_idx, column=1, sticky='E',pady=10)
-
-        # 명도 보정 효과
-        row_idx += 1
-        Label(self.frame, text="명도 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.gamma_button = Checkbutton(self.frame, text='gamma correction', variable=self.check_gamma)
-        self.gamma_button.grid(row=row_idx, column=1, sticky='E',pady=5)
-
-        row_idx += 1
-        Label(self.frame, text="gamma value").grid(row=row_idx,column=0,pady=3,sticky=S)
-        self.gamma_scale = Scale(self.frame, from_=0.3,to=2.0, orient=HORIZONTAL,resolution=0.1)
-        self.gamma_scale.set(self.gamma_value)
-        self.gamma_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        # 색조 보정 효과
-        row_idx += 1
-        Label(self.frame, text="색조 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
-        self.vignette_button = Checkbutton(self.frame, text='apply', variable=self.check_color)
-        self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
-
-        row_idx += 1
-        Label(self.frame, text="  red weight").grid(row=row_idx,column=0,pady=3,sticky=S)
-        self.red_weight_scale = Scale(self.frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
-        self.red_weight_scale.set(self.red_weight)
-        self.red_weight_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        row_idx += 1
-        Label(self.frame, text="  green weight").grid(row=row_idx,column=0,pady=3,sticky=S)
-        self.green_weight_scale = Scale(self.frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
-        self.green_weight_scale.set(self.green_weight)
-        self.green_weight_scale.grid(row=row_idx,column=1,sticky="ew")
-
-        row_idx += 1
-        Label(self.frame, text="  blue weight").grid(row=row_idx,column=0,pady=3,sticky=S)
-        self.blue_weight_scale = Scale(self.frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
-        self.blue_weight_scale.set(self.blue_weight)
-        self.blue_weight_scale.grid(row=row_idx,column=1,sticky="ew")
-
-    def bind_key_to_frame(self):
-        # component와 event handler를 bind하는 메소드
-        self.file_mask_btn.configure(command=self.select_mask_file)
-        self.blend_scale.configure(command=self.convert_blend_ratio)
-        self.vignette_ys_scale.configure(command=self.convert_vignette_ys)
-        self.vignette_yc_scale.configure(command=self.convert_vignette_yc)
-        self.vignette_xs_scale.configure(command=self.convert_vignette_xs)
-        self.vignette_xc_scale.configure(command=self.convert_vignette_xc)
-        self.gamma_scale.configure(command=self.convert_gamma)
-        self.red_weight_scale.configure(command=self.convert_red_weight)
-        self.green_weight_scale.configure(command=self.convert_green_weight)
-        self.blue_weight_scale.configure(command=self.convert_blue_weight)
+        self.master.minsize(width=WIDTH+700,height=HEIGHT)
 
     def set_video(self):
         # 카메라의 출력 부분을 설정해주는 함수
@@ -230,17 +115,146 @@ class Application(Frame):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2*HEIGHT)
 
-    def set_iphone_round_border(self):
-        # 아이폰처럼 화면 내 border을 둥글게 나오도록 세팅
-        points = [0+RADIUS, 0, 0+RADIUS, 0, WIDTH-RADIUS, 0, WIDTH-RADIUS, 0,
-          WIDTH, 0, WIDTH, 0+RADIUS, WIDTH, 0+RADIUS, WIDTH, HEIGHT-RADIUS,
-          WIDTH, HEIGHT-RADIUS, WIDTH, HEIGHT, WIDTH-RADIUS, HEIGHT,
-          WIDTH-RADIUS, HEIGHT, 0+RADIUS, HEIGHT, 0+RADIUS, HEIGHT,
-          0, HEIGHT, 0, HEIGHT-RADIUS, 0, HEIGHT-RADIUS, 0, 0+RADIUS, 0, 0+RADIUS, 0, 0]
+    def set_board(self):
+        self.frame = Frame(self.master,width=300,height=2000,borderwidth=1,relief=GROOVE,padx=20,pady=10)
+        self.frame.grid(row=0,column=1,sticky='ne')
 
-        self.canvas.create_polygon(points,
-            fill=IPHONE_COLOR,
-            smooth=True)
+        row_idx = 0
+
+        row_idx += 1
+        Label(self.frame, text="MASK", font=('Helvetica',15)).grid(row=row_idx,column=0,pady=10,sticky='w')
+        # filename show
+        row_idx += 1
+        Label(self.frame, text="mask 적용 유무 :").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.mask_button = Checkbutton(self.frame, text='apply', variable=self.check_mask)
+        self.mask_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="mask 적용 방식 :").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.mask_option = OptionMenu(self.frame, self.check_blend_type, "합치기", "블렌드하기")
+        self.check_blend_type.set("합치기")
+        self.mask_option.grid(row=row_idx, column=1, sticky="E",pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="mask 적용 형태 :").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.mask_feature_option = OptionMenu(self.frame, self.check_mask_type, "외각선만", "전체")
+        self.check_mask_type.set("외각선만")
+        self.mask_feature_option.grid(row=row_idx, column=1, sticky="E",pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="blend ratio").grid(row=row_idx,column=0,pady=3,sticky='w')
+        self.blend_scale = Scale(self.frame, from_=0.0,to=1.0, orient=HORIZONTAL,resolution=0.1)
+        self.blend_scale.set(self.blend_ratio)
+        self.blend_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        self.file_mask_btn = Button(self.frame, text="mask image",width=30,height=2)
+        self.file_mask_btn.grid(row=row_idx,column=0,columnspan=2,sticky="nwe",pady=5)
+        row_idx+=1
+        self.preview_imagebox = Label(self.frame,height=20,width=20,background='black')
+        self.preview_imagebox.grid(row=row_idx,column=0,columnspan=2,sticky="ew",pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="촬영 효과", font=('Helvetica',15)).grid(row=row_idx,column=0,pady=10,sticky='w')
+
+        row_idx += 1
+        Label(self.frame, text="out-focus").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.outfocus_bg_button = Checkbutton(self.frame, text='적용하기', variable=self.check_outfocus_bg)
+        self.outfocus_bg_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="background-dark").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.dark_bg_button = Checkbutton(self.frame, text='적용하기', variable=self.check_dark_bg)
+        self.dark_bg_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.frame, text="grid-line").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.grid_button = Checkbutton(self.frame, text='적용하기', variable=self.check_grid)
+        self.grid_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+
+        self.mask_frame = Frame(self.master,width=300,height=500,borderwidth=1,relief=GROOVE,padx=20,pady=10)
+        self.mask_frame.grid(row=0,column=2,sticky='ne')
+        row_idx = 0
+
+        Label(self.mask_frame, text="FILTER",font=('Helvetica',15)).grid(row=row_idx,column=0,pady=10,sticky='w')
+        # Gray 이미지로 변환
+        row_idx += 1
+        Label(self.mask_frame, text="GRAY < - > RGB").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.gray_button = Checkbutton(self.mask_frame, text='GRAY', variable=self.check_gray)
+        self.gray_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        # vignette 필터 효과
+        row_idx += 1
+        Label(self.mask_frame, text="Vignette filter").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.vignette_button = Checkbutton(self.mask_frame, text='Vignette', variable=self.check_vignette)
+        self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.mask_frame, text="  수직 side weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.vignette_ys_scale = Scale(self.mask_frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_ys_scale.set(self.vignette_ys)
+        self.vignette_ys_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.mask_frame, text="  수직 center weight").grid(row=row_idx,column=0,pady=3,sticky='w')
+        self.vignette_yc_scale = Scale(self.mask_frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_yc_scale.set(self.vignette_yc)
+        self.vignette_yc_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.mask_frame, text="  수평 side weight").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.vignette_xs_scale = Scale(self.mask_frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_xs_scale.set(self.vignette_xs)
+        self.vignette_xs_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.mask_frame, text="  수평 center weight").grid(row=row_idx,column=0,pady=3,sticky='w')
+        self.vignette_xc_scale = Scale(self.mask_frame, from_=0.5,to=1.5, orient=HORIZONTAL,resolution=0.1)
+        self.vignette_xc_scale.set(self.vignette_xc)
+        self.vignette_xc_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        # contrast 강화 효과
+        row_idx += 1
+        Label(self.mask_frame, text="contrast(clahe)").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.clahe_button = Checkbutton(self.mask_frame, text='apply', variable=self.check_clahe)
+        self.clahe_button.grid(row=row_idx, column=1, sticky='E',pady=10)
+
+        # 명도 보정 효과
+        row_idx += 1
+        Label(self.mask_frame, text="명도 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.gamma_button = Checkbutton(self.mask_frame, text='gamma correction', variable=self.check_gamma)
+        self.gamma_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.mask_frame, text="gamma value").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.gamma_scale = Scale(self.mask_frame, from_=0.3,to=2.0, orient=HORIZONTAL,resolution=0.1)
+        self.gamma_scale.set(self.gamma_value)
+        self.gamma_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        # 색조 보정 효과
+        row_idx += 1
+        Label(self.mask_frame, text="색조 보정").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.vignette_button = Checkbutton(self.mask_frame, text='apply', variable=self.check_color)
+        self.vignette_button.grid(row=row_idx, column=1, sticky='E',pady=5)
+
+        row_idx += 1
+        Label(self.mask_frame, text="  red weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.red_weight_scale = Scale(self.mask_frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
+        self.red_weight_scale.set(self.red_weight)
+        self.red_weight_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.mask_frame, text="  green weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.green_weight_scale = Scale(self.mask_frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
+        self.green_weight_scale.set(self.green_weight)
+        self.green_weight_scale.grid(row=row_idx,column=1,sticky="ew")
+
+        row_idx += 1
+        Label(self.mask_frame, text="  blue weight").grid(row=row_idx,column=0,pady=3,sticky=S)
+        self.blue_weight_scale = Scale(self.mask_frame, from_=0.3,to=1.8, orient=HORIZONTAL,resolution=0.1)
+        self.blue_weight_scale.set(self.blue_weight)
+        self.blue_weight_scale.grid(row=row_idx,column=1,sticky="ew")
 
     def set_iphone_button(self):
         self.image_up = self.read_image(BTN_UP_PATH)
@@ -261,6 +275,31 @@ class Application(Frame):
 
         self.canvas.create_window(WIDTH//2,HEIGHT-100, window=self.shutter_btn)
 
+    def set_iphone_round_border(self):
+        # 아이폰처럼 화면 내 border을 둥글게 나오도록 세팅
+        points = [0+RADIUS, 0, 0+RADIUS, 0, WIDTH-RADIUS, 0, WIDTH-RADIUS, 0,
+          WIDTH, 0, WIDTH, 0+RADIUS, WIDTH, 0+RADIUS, WIDTH, HEIGHT-RADIUS,
+          WIDTH, HEIGHT-RADIUS, WIDTH, HEIGHT, WIDTH-RADIUS, HEIGHT,
+          WIDTH-RADIUS, HEIGHT, 0+RADIUS, HEIGHT, 0+RADIUS, HEIGHT,
+          0, HEIGHT, 0, HEIGHT-RADIUS, 0, HEIGHT-RADIUS, 0, 0+RADIUS, 0, 0+RADIUS, 0, 0]
+
+        self.canvas.create_polygon(points,
+            fill=IPHONE_COLOR,
+            smooth=True)
+
+    def bind_key_to_frame(self):
+        # component와 event handler를 bind하는 메소드
+        self.file_mask_btn.configure(command=self.select_mask_file)
+        self.blend_scale.configure(command=self.convert_blend_ratio)
+        self.vignette_ys_scale.configure(command=self.convert_vignette_ys)
+        self.vignette_yc_scale.configure(command=self.convert_vignette_yc)
+        self.vignette_xs_scale.configure(command=self.convert_vignette_xs)
+        self.vignette_xc_scale.configure(command=self.convert_vignette_xc)
+        self.gamma_scale.configure(command=self.convert_gamma)
+        self.red_weight_scale.configure(command=self.convert_red_weight)
+        self.green_weight_scale.configure(command=self.convert_green_weight)
+        self.blue_weight_scale.configure(command=self.convert_blue_weight)
+
     def show_frame(self):
         # 카메라의 frame 출력 처리에 대한 pipeline
         # 카메라의 filter 설정 등은 여기서 이루어져야 함
@@ -268,16 +307,16 @@ class Application(Frame):
 
         frame = self.adjust_frame(frame) # 영상을 올바른 형태로 변환
         frame = self.preprocess_image(frame) # 영상 품질 보정
+        frame = self.shutter_image(frame) # 영상 저장할 경우, 찰칵 효과 + 저장
         frame = self.postprocess_image(frame) # 영상에 필터 적용
+
         frame = self.apply_mask(frame) # 영상에 마스크 적용
 
-        frame = self.shutter_image(frame) # 영상 저장할 경우, 찰칵 효과 + 저장
         self.print_to_canvas(frame) # 영상을 canvas에 올리기
-
         self.canvas.after(FPS, self.show_frame) # application이 FPS만큼 후 다시 self.show_frame을 실행
 
     def show_preview_image(self):
-        # 현재 cv_image의 original image를 보여줌
+        # 현재 mask의 original image를 보여줌
         if self.mask_image is not None:
             preview_image = cv2.resize(self.mask_image,(150,300))
             self.preview_image = ImageTk.PhotoImage(Image.fromarray(preview_image))
@@ -297,6 +336,11 @@ class Application(Frame):
         return cv2.GaussianBlur(frame,(5,5),0)
 
     def postprocess_image(self,frame):
+        frame = self.filter_image(frame)
+        frame = self.apply_shooting_effect(frame)
+        return frame
+
+    def filter_image(self,frame):
         # 필터 처리를 담당하는 메소드
         if self.check_vignette.get() == 1:
             # vignette 필터 적용
@@ -320,18 +364,61 @@ class Application(Frame):
             # 흑백으로 변경
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        return frame
+
+    def apply_shooting_effect(self,frame):
+        # 마스크 적용하기
+        if self.mask_image is None:
+            return frame
+
+        if self.check_outfocus_bg.get() == 1 or self.check_outfocus_bg.get() == 1:
+
+            mask = cv2.cvtColor(self.mask_image, cv2.COLOR_RGB2GRAY)
+            mask_inv = ~mask
+            bg = cv2.bitwise_and(frame,frame,mask=mask_inv)
+            frame = cv2.bitwise_and(frame,frame,mask=mask)
+
+            if self.check_outfocus_bg.get() == 1:
+                bg = cv2.blur(bg,self.outfocus_blur)
+                bg = cv2.bitwise_and(bg,bg,mask=mask_inv)
+
+            if self.check_dark_bg.get() == 1:
+                bg = cv2.LUT(bg, self.background_lut)
+
+            frame = cv2.add(bg,frame)
+
+        if self.check_grid.get() == 1:
+            frame = cv2.add(self.grid_mask,frame)
 
         return frame
+
+    def apply_outfocus_effect(self,frame):
+        mask = cv2.cvtColor(self.mask_image, cv2.COLOR_RGB2GRAY)
+        mask_inv = ~mask
+
+        bg = cv2.bitwise_and(frame,frame,mask=mask_inv)
+        frame = cv2.bitwise_and(frame,frame,mask=mask)
+
+        bg = cv2.blur(bg,(31,31))
+        bg = cv2.bitwise_and(bg,bg,mask=mask_inv)
+        return cv2.add(frame,bg)
 
     def apply_mask(self, frame):
         # 마스크 적용하기
         if self.mask_image is None:
             return frame
         if self.check_mask.get() == 1:
-            if self.check_blend_type.get() == "합치기":
-                frame = cv2.add(frame, self.mask_image)
+            if self.check_mask_type.get() == "외각선만":
+                mask_image = self.mask_contour_image
             else:
-                frame = cv2.addWeighted(frame, (1-self.blend_ratio), self.mask_image, self.blend_ratio, 0)
+                mask_image = self.mask_image
+
+            if self.check_blend_type.get() == "합치기":
+                mask = (mask_image * self.blend_ratio).astype(np.uint8)
+                frame = cv2.add(frame, mask)
+
+            else:
+                frame = cv2.addWeighted(frame, (1-self.blend_ratio), mask_image, self.blend_ratio, 0)
         return frame
 
     def shutter_image(self,frame):
@@ -366,6 +453,19 @@ class Application(Frame):
         frame[frame<shutter_effect] = shutter_effect
         return frame
 
+    def extract_contour_mask(self, mask):
+        kernel = np.ones((10,10), np.uint8)
+        erosion = cv2.erode(mask, kernel, iterations =1)
+        return mask - erosion
+
+    def get_grid_mask(self):
+        grid_mask = np.zeros((CAM_HEIGHT,CAM_WIDTH,3),dtype=np.uint8)
+        for i in np.linspace(0,CAM_WIDTH,3,endpoint=False, dtype=np.int)[1:]:
+            grid_mask = cv2.line(grid_mask,(i,0),(i,CAM_HEIGHT),(255,255,255),1)
+        for i in np.linspace(0,CAM_HEIGHT,3,endpoint=False, dtype=np.int)[1:]:
+            grid_mask = cv2.line(grid_mask,(0,i),(CAM_WIDTH,i),(255,255,255),1)
+        return grid_mask
+
     def select_mask_file(self, event=None):
         # 적용할 마스크가 있는 이미지를 선택
         self.mask_path = filedialog.askopenfilename()
@@ -374,6 +474,7 @@ class Application(Frame):
         self.mask_image = cv2.imread(self.mask_path)
         self.mask_image = cv2.cvtColor(self.mask_image, cv2.COLOR_BGR2RGB)
         self.mask_image = cv2.resize(self.mask_image, (CAM_WIDTH,CAM_HEIGHT))
+        self.mask_contour_image = self.extract_contour_mask(self.mask_image)
 
         self.show_preview_image()
 
@@ -466,6 +567,7 @@ Helper
         - create_vignette_mask & vignette_func : vignette filter(hightlight 강조)하는 함수
         - create_lut : Look-Up Table을 생성하는 함수
 '''
+
 def threaded(fn):
     def wrapper(*args, **kwargs):
         thread = Thread(target=fn, args=args, kwargs=kwargs)
@@ -485,7 +587,6 @@ def memoize(func):
     return memoizer
 
 class CounterThread(Thread):
-    # 화면에 카운트다운을 출력하는 함수
     def __init__(self, counter, app):
         Thread.__init__(self)
         self.counter = counter
