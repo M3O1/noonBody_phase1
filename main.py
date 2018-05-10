@@ -46,6 +46,7 @@ class Application(Frame):
 
         self.counter = SHUTTER_LAG  # 사진 찍기 까지의 delay 시간
         self.counter_thread = None # 사진 찍기 전 counter를 노출하는 thread
+        self.grabcut_thread = GrabCutThread(self) # grab-cut을 수행하는 thread
 
         self.toggle_save = False # 이미지를 저장할 것인가 유무
         self.shutter_effect = 0
@@ -64,6 +65,8 @@ class Application(Frame):
         self.background_lut = create_lut(0.5)
         self.check_grid = IntVar()
         self.grid_mask = self.get_grid_mask()
+        self.check_grab_cut = False
+        self.grab_rect = self.get_grab_rect()
 
         self.check_gray = IntVar()
         self.check_vignette = IntVar()
@@ -116,6 +119,7 @@ class Application(Frame):
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2*HEIGHT)
 
     def set_board(self):
+        # 영상 조작 부분 (mask, 촬영, 필터 등)
         self.frame = Frame(self.master,width=300,height=2000,borderwidth=1,relief=GROOVE,padx=20,pady=10)
         self.frame.grid(row=0,column=1,sticky='ne')
 
@@ -172,6 +176,13 @@ class Application(Frame):
         self.grid_button = Checkbutton(self.frame, text='적용하기', variable=self.check_grid)
         self.grid_button.grid(row=row_idx, column=1, sticky='E',pady=5)
 
+        row_idx += 1
+        Label(self.frame, text="Segmentation", font=('Helvetica',15)).grid(row=row_idx,column=0,pady=10,sticky='w')
+
+        row_idx += 1
+        Label(self.frame, text="GRAB-CUT").grid(row=row_idx,column=0,pady=10,sticky='w')
+        self.grab_cut_button = Button(self.frame, text='적용하기', command=self.toggle_grabcut_state)
+        self.grab_cut_button.grid(row=row_idx, column=1, sticky='E',pady=5)
 
         self.mask_frame = Frame(self.master,width=300,height=500,borderwidth=1,relief=GROOVE,padx=20,pady=10)
         self.mask_frame.grid(row=0,column=2,sticky='ne')
@@ -372,20 +383,17 @@ class Application(Frame):
             return frame
 
         if self.check_outfocus_bg.get() == 1 or self.check_outfocus_bg.get() == 1:
-
             mask = cv2.cvtColor(self.mask_image, cv2.COLOR_RGB2GRAY)
             mask_inv = ~mask
+            fg = cv2.bitwise_and(frame,frame,mask=mask)
             bg = cv2.bitwise_and(frame,frame,mask=mask_inv)
-            frame = cv2.bitwise_and(frame,frame,mask=mask)
-
             if self.check_outfocus_bg.get() == 1:
                 bg = cv2.blur(bg,self.outfocus_blur)
                 bg = cv2.bitwise_and(bg,bg,mask=mask_inv)
 
             if self.check_dark_bg.get() == 1:
                 bg = cv2.LUT(bg, self.background_lut)
-
-            frame = cv2.add(bg,frame)
+            frame = cv2.add(bg,fg)
 
         if self.check_grid.get() == 1:
             frame = cv2.add(self.grid_mask,frame)
@@ -405,6 +413,10 @@ class Application(Frame):
 
     def apply_mask(self, frame):
         # 마스크 적용하기
+        if self.check_grab_cut:
+            outline_mask = self.grabcut_thread.outline()
+            frame = cv2.add(frame, outline_mask)
+
         if self.mask_image is None:
             return frame
         if self.check_mask.get() == 1:
@@ -419,6 +431,7 @@ class Application(Frame):
 
             else:
                 frame = cv2.addWeighted(frame, (1-self.blend_ratio), mask_image, self.blend_ratio, 0)
+
         return frame
 
     def shutter_image(self,frame):
@@ -466,6 +479,14 @@ class Application(Frame):
             grid_mask = cv2.line(grid_mask,(0,i),(CAM_WIDTH,i),(255,255,255),1)
         return grid_mask
 
+    def get_grab_rect(self):
+        if self.mask_image is None:
+            outline= np.zeros((CAM_HEIGHT,CAM_WIDTH,3),dtype=np.uint8)
+            outline[CAM_HEIGHT//3:,30:CAM_WIDTH-30,:] = 255
+        else:
+            outline = self.mask_image
+        return outline
+
     def select_mask_file(self, event=None):
         # 적용할 마스크가 있는 이미지를 선택
         self.mask_path = filedialog.askopenfilename()
@@ -475,7 +496,7 @@ class Application(Frame):
         self.mask_image = cv2.cvtColor(self.mask_image, cv2.COLOR_BGR2RGB)
         self.mask_image = cv2.resize(self.mask_image, (CAM_WIDTH,CAM_HEIGHT))
         self.mask_contour_image = self.extract_contour_mask(self.mask_image)
-
+        self.grab_rect = self.get_grab_rect()
         self.show_preview_image()
 
     def press_shutter_btn(self, event=None):
@@ -491,6 +512,17 @@ class Application(Frame):
             self.counter_thread.set_counter(SHUTTER_LAG)
         else:
             self.counter_thread.start()
+
+    def toggle_grabcut_state(self):
+        if not self.check_grab_cut:
+            self.grab_cut_button.config({"text" : "멈추기"})
+            if self.grabcut_thread.stopped():
+                self.grabcut_thread = GrabCutThread(self)
+            self.grabcut_thread.start()
+        else:
+            self.grab_cut_button.config({"text" : "적용하기"})
+            self.grabcut_thread.stop()
+        self.check_grab_cut = not self.check_grab_cut
 
     def convert_blend_ratio(self,event):
         re_num = re.compile("^\d*(\.?\d*)$")
@@ -571,9 +603,10 @@ Helper
 def threaded(fn):
     def wrapper(*args, **kwargs):
         thread = Thread(target=fn, args=args, kwargs=kwargs)
-        thread.start()
+        thread.run()
         return thread
     return wrapper
+
 
 def memoize(func):
     cache = {}
@@ -593,16 +626,59 @@ class CounterThread(Thread):
         self.app = app
 
     def run(self):
-        text = app.canvas.create_text(50,30,fill="white",font="Times 40 bold", text=str(self.counter),tags=('counter',))
+        text = self.app.canvas.create_text(50,30,fill="white",font="Times 40 bold", text=str(self.counter),tags=('counter',))
         while self.counter > 0:
             time.sleep(1)
             self.counter -= 1
-            app.canvas.itemconfigure(text, text=str(self.counter))
-        app.canvas.delete('counter')
+            self.app.canvas.itemconfigure(text, text=str(self.counter))
+        self.app.canvas.delete('counter')
         self.app.toggle_save = True
 
     def set_counter(self, counter):
         self.counter = counter
+
+class GrabCutThread(Thread):
+    def __init__(self, app):
+        Thread.__init__(self)
+        self.app = app
+        self.outline_mask = np.zeros((CAM_HEIGHT,CAM_WIDTH,3),dtype=np.uint8)
+        self.stopsignal = threading.Event()
+        self.stop()
+
+    def run(self):
+        self.clear()
+        bgdModel = np.zeros((1,65),np.float64)
+        fgdModel = np.zeros((1,65),np.float64)
+        outline = cv2.cvtColor(self.app.grab_rect,cv2.COLOR_RGB2GRAY)
+        x,y,w,h = cv2.boundingRect(outline)
+        h = HEIGHT - y
+        rect = (x,y,w,h)
+
+        kernel = np.ones((5,5),np.uint8)
+        while True:
+            _, frame = self.app.cap.read()
+            frame = self.app.adjust_frame(frame)
+
+            mask = np.zeros(frame.shape[:2],np.uint8)
+
+            cv2.grabCut(frame, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
+            outline = np.where((mask==2)|(mask==0),0,1).astype(np.uint8)
+            self.outline_mask[:,:,0] = 125*outline
+            if self.stopped():
+                self.outline_mask[:,:,0] = 0
+                break
+
+    def outline(self):
+        return self.outline_mask
+
+    def stop(self):
+        self.stopsignal.set()
+
+    def stopped(self):
+        return self.stopsignal.is_set()
+
+    def clear(self):
+        self.stopsignal.clear()
 
 def create_vignette_mask(width, height,
                         side_width, center_width,
@@ -635,5 +711,11 @@ def create_lut(weights):
 if __name__ == "__main__":
     root = Tk()
     app = Application(root)
-    root.bind("<Escape>", lambda e : root.quit())
+
+    def quit(event=None):
+        app.grabcut_thread.stop()
+        root.quit()
+
+    root.bind("<Escape>", quit)
+
     root.mainloop()
