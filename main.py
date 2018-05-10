@@ -45,7 +45,7 @@ class Application(Frame):
         self.canvas = None # 카메라 화면이 들어가는 부분
 
         self.counter = SHUTTER_LAG  # 사진 찍기 까지의 delay 시간
-        self.counter_thread = None # 사진 찍기 전 counter를 노출하는 thread
+        self.counter_thread = CounterThread(SHUTTER_LAG, self) # 사진 찍기 전 counter를 노출하는 thread
         self.grabcut_thread = GrabCutThread(self) # grab-cut을 수행하는 thread
 
         self.toggle_save = False # 이미지를 저장할 것인가 유무
@@ -501,22 +501,20 @@ class Application(Frame):
 
     def press_shutter_btn(self, event=None):
         self.shutter_btn.config(image=self.image_down)
-        if self.counter_thread is None:
+        if not self.counter_thread.is_stop():
+            self.counter_thread.stop()
             self.counter_thread = CounterThread(SHUTTER_LAG, self)
-        elif not self.counter_thread.is_alive():
+        else:
             self.counter_thread = CounterThread(SHUTTER_LAG, self)
 
     def release_shutter_btn(self, event=None):
         self.shutter_btn.config(image=self.image_up)
-        if self.counter_thread.is_alive():
-            self.counter_thread.set_counter(SHUTTER_LAG)
-        else:
-            self.counter_thread.start()
+        self.counter_thread.start()
 
     def toggle_grabcut_state(self):
         if not self.check_grab_cut:
             self.grab_cut_button.config({"text" : "멈추기"})
-            if self.grabcut_thread.stopped():
+            if self.grabcut_thread.is_stop():
                 self.grabcut_thread = GrabCutThread(self)
             self.grabcut_thread.start()
         else:
@@ -624,18 +622,41 @@ class CounterThread(Thread):
         Thread.__init__(self)
         self.counter = counter
         self.app = app
+        self.text = None
+        self.stopsignal = threading.Event()
+        self.stop()
 
     def run(self):
-        text = self.app.canvas.create_text(50,30,fill="white",font="Times 40 bold", text=str(self.counter),tags=('counter',))
+        self.clear()
+        self.text = self.app.canvas.create_text(50,30,fill="white",font="Times 40 bold", text=str(self.counter),tags=('counter',))
         while self.counter > 0:
-            time.sleep(1)
+            for _ in range(10000):
+                time.sleep(0.0001)
+                if self.is_stop():
+                    self.app.canvas.delete('counter')
+                    self.text = None
+                    return
             self.counter -= 1
-            self.app.canvas.itemconfigure(text, text=str(self.counter))
+            if self.is_stop():
+                self.app.canvas.delete('counter')
+                self.text = None
+                return
+            self.app.canvas.itemconfigure(self.text, text=str(self.counter))
         self.app.canvas.delete('counter')
         self.app.toggle_save = True
+        self.stop()
 
     def set_counter(self, counter):
         self.counter = counter
+
+    def stop(self):
+        self.stopsignal.set()
+
+    def is_stop(self):
+        return self.stopsignal.is_set()
+
+    def clear(self):
+        self.stopsignal.clear()
 
 class GrabCutThread(Thread):
     def __init__(self, app):
@@ -664,7 +685,7 @@ class GrabCutThread(Thread):
             cv2.grabCut(frame, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
             outline = np.where((mask==2)|(mask==0),0,1).astype(np.uint8)
             self.outline_mask[:,:,0] = 125*outline
-            if self.stopped():
+            if self.is_stop():
                 self.outline_mask[:,:,0] = 0
                 break
 
@@ -674,7 +695,7 @@ class GrabCutThread(Thread):
     def stop(self):
         self.stopsignal.set()
 
-    def stopped(self):
+    def is_stop(self):
         return self.stopsignal.is_set()
 
     def clear(self):
