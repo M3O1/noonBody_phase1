@@ -4,6 +4,7 @@ import glob
 import random
 import re
 
+import h5py
 import numpy as np
 import pandas as pd
 import cv2
@@ -24,12 +25,14 @@ BUCKET_NAME = "baidu-segmentation-dataset"
     Full Data Generation Method
 
     핵심 메소드
-    get_dataset
-    : local 혹은 S3에서 데이터를 가져와 full dataset을 만드는 메소드
+    dataGenerator
+    : 데이터를 배치단위로 생성하는 메소드
 
     관련 메소드
 
-    1. 디렉토리 처리 메소드
+    1. 데이터셋 생성 관련 메소드
+        - load_dataset
+        - check_h5
         - get_fnameset
 
     2. Augmentation 관련 메소드
@@ -45,79 +48,95 @@ BUCKET_NAME = "baidu-segmentation-dataset"
         - download_whole_dataset
 
 '''
-def get_dataset(image_dir="./data/images/", label_dir="./data/profiles", input_size=(48,48), is_train=True):
-    # image_dir와 label_dir 내 파일 이름은 동일
-    # 그러므로 intersection된 파일 이름이 우리가 학습할 데이터
-    if not os.path.exists(image_dir) or not os.path.exists(label_dir) or len(os.listdir(image_dir)) <= 100 or len(os.listdir(label_dir)) <= 100:
-        print("Start to Download---")
+def dataGenerator(data_dir, input_size, batch_size=64):
+    x_data,ydata = load_dataset(data_dir=data_dir,input_size=input_size)
+    dataset = list(zip(xdata,ydata))
+
+    while True:
+        random.shuffle(dataset)
+        gen = dataset.copy()
+
+        counter = 0; batch_x = []; batch_y = []
+        for image, label in gen:
+            counter += 1
+
+            x,y = apply_rotation(image,label)
+            x,y = apply_rescaling(x,y)
+            x,y = apply_flip(x,y)
+            x,y = apply_random_crop(x,y, input_size)
+            x = random_noise(x,mode='gaussian',mean=0,var=0.001)
+            # adjust the range of value
+            x = np.clip(x,0.,1.)
+            y = (y>0.7).astype(int)
+
+            batch_x.append(x); batch_y.append(y)
+            if counter == batch_size:
+                yield np.stack(batch_x, axis=0), np.stack(batch_y, axis=0)
+                counter = 0; batch_x = []; batch_y = []
+
+def load_dataset(data_dir="./data", input_size=(48,48)):
+
+    # 이전에 h5py로 저장해두었다면 그것을 Load
+    h5_path = os.path.join(data_dir,"image.h5")
+    xdata,ydata = check_h5(h5_path,input_size)
+    if xdata is not None:
+        return xdata, ydata
+
+    image_dir = os.path.join(data_dir,"images")
+    label_dir = os.path.join(data_dir,"profiles")
+
+    # 아예 다운도 받지 않았다면 다운 받자
+    if image_dir is None or label_dir is None or\
+        not os.path.exists(image_dir) or not os.path.exists(label_dir) or\
+        len(os.listdir(image_dir)) <= 100 or len(os.listdir(label_dir)) <= 100:
         s3 = boto3.client('s3')
         image_dir, label_dir = download_whole_dataset(s3)
 
+    # 다운 받았으면 이것을 저장해버리자
     fname_list = list(get_fnameset(image_dir) & get_fnameset(label_dir))
-    random.shuffle(fname_list)
-
-    # 데이터셋 다운로드 받기
-    pool = Pool(processes=multiprocessing.cpu_count())
-    start_time  = time.time()
-    result = pool.map(partial(data_workers,input_size,is_train,image_dir,label_dir),
-        np.array_split(fname_list,multiprocessing.cpu_count()))
-    x,y = list(zip(*result))
-    xdata = np.concatenate(x,axis=0)
-    ydata = np.concatenate(y,axis=0)
-    print("consumed---{}".format(time.time()-start_time))
-    pool.close()
-
-    return xdata, ydata
-
-def data_workers(input_size, is_train, image_dir, label_dir, fname_list):
     cut_size = int(input_size[0] * 4/3), int(input_size[1] * 4/3)
     images = []
     labels = []
-    if isinstance(fname_list,np.ndarray):
-        fname_list = list(fname_list)
     while len(fname_list) > 0:
         fname = fname_list.pop()
         image_path = os.path.join(image_dir,fname)
         label_path = os.path.join(label_dir,fname)
-
         # read the image
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
-
         label = cv2.imread(label_path,0)
 
         # normalization
-        image = image/255.
-        label = label/255
+        image = image / 255.
+        label = label / 255
 
-        if is_train:
-            image = cv2.resize(image,cut_size)
-            label = cv2.resize(label,cut_size)
-        else :
-            image = cv2.resize(image,input_size)
-            label = cv2.resize(label,input_size)
-            label = (label>0.7).astype(int)
-            images.append(image)
-            labels.append(label)
-            continue
+        image = cv2.resize(image,cut_size)
+        label = cv2.resize(label,cut_size)
 
-        # data augmentation
-        x,y = apply_rotation(image,label)
-        x,y = apply_rescaling(x,y)
-        x,y = apply_flip(x,y)
-        x,y = apply_random_crop(x,y, input_size)
-        x = random_noise(x,mode='gaussian',mean=0,var=0.001)
-
-        # adjust the range of value
-        x = np.clip(x,0.,1.)
-        y = (y>0.7).astype(int)
-
-        images.append(x)
-        labels.append(y)
+        label = (label>0.7).astype(int)
+        images.append(image)
+        labels.append(label)
 
     xdata = np.stack(images, axis=0)
     ydata = np.stack(labels, axis=0)
+
+    with h5py.File(h5_path) as h5:
+        # 저장
+        grp = h5.create_group("{},{}".format(*input_size))
+        grp.create_dataset('xdata',data=xdata)
+        grp.create_dataset('ydata',data=ydata)
+
     return xdata, ydata
+
+def check_h5(h5_path,input_size):
+    if os.path.exists(h5_path):
+        with h5py.File(h5_path) as h5:
+            key = "{},{}".format(*input_size)
+            if key in h5:
+                xdata = h5[key]['xdata'][:]
+                ydata = h5[key]['ydata'][:]
+                return xdata, ydata
+    return None, None
 
 def get_fnameset(dirpath):
     # 디렉토리 내 filename set을 추출하는 메소드
