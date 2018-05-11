@@ -45,17 +45,15 @@ BUCKET_NAME = "baidu-segmentation-dataset"
         - download_whole_dataset
 
 '''
-def get_dataset(image_dir="./data/images/", label_dir="./data/profiles/", input_size=(48,48), is_train=True):
+def get_dataset(image_dir="./data/images/", label_dir="./data/profiles", input_size=(48,48), is_train=True):
     # image_dir와 label_dir 내 파일 이름은 동일
     # 그러므로 intersection된 파일 이름이 우리가 학습할 데이터
-
-    fname_list = list(get_fnameset(image_dir) & get_fnameset(label_dir))
-    if len(fname_list) == 0:
-        # 없는 경우 다운로드 받음
+    if not os.path.exists(image_dir) or not os.path.exists(label_dir) or len(os.listdir(image_dir)) <= 100 or len(os.listdir(label_dir)) <= 100:
         print("Start to Download---")
         s3 = boto3.client('s3')
         image_dir, label_dir = download_whole_dataset(s3)
-        fname_list = list(get_fnameset(image_dir) & get_fnameset(label_dir))
+
+    fname_list = list(get_fnameset(image_dir) & get_fnameset(label_dir))
     random.shuffle(fname_list)
 
     # 데이터셋 다운로드 받기
@@ -183,6 +181,6 @@ def download_whole_dataset(s3):
     for idx, key in enumerate(keys):
         download(s3, BUCKET_NAME, key, key)
         if idx % 100 == 0:
-            print("{} download is completed -- {:.2f}".format(time.time()-start_time))
+            print("{} download is completed -- {:.2f}".format(idx, time.time()-start_time))
             start_time = time.time()
     return image_dir, label_dir
