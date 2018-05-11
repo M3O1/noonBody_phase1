@@ -48,16 +48,14 @@ BUCKET_NAME = "baidu-segmentation-dataset"
         - download_whole_dataset
 
 '''
-def dataGenerator(data_dir, input_size, batch_size=64):
-    x_data,ydata = load_dataset(data_dir=data_dir,input_size=input_size)
-    dataset = list(zip(xdata,ydata))
-
+def dataGenerator(dataset, input_size, batch_size=64):
     while True:
         random.shuffle(dataset)
         gen = dataset.copy()
 
         counter = 0; batch_x = []; batch_y = []
         for image, label in gen:
+            label = label.astype(np.float)
             counter += 1
 
             x,y = apply_rotation(image,label)
@@ -80,7 +78,8 @@ def load_dataset(data_dir="./data", input_size=(48,48)):
     h5_path = os.path.join(data_dir,"image.h5")
     xdata,ydata = check_h5(h5_path,input_size)
     if xdata is not None:
-        return xdata, ydata
+        dataset = list(zip(xdata, ydata))
+        return dataset
 
     image_dir = os.path.join(data_dir,"images")
     label_dir = os.path.join(data_dir,"profiles")
@@ -125,8 +124,8 @@ def load_dataset(data_dir="./data", input_size=(48,48)):
         grp = h5.create_group("{},{}".format(*input_size))
         grp.create_dataset('xdata',data=xdata)
         grp.create_dataset('ydata',data=ydata)
-
-    return xdata, ydata
+    dataset = list(zip(xdata,ydata))
+    return dataset
 
 def check_h5(h5_path,input_size):
     if os.path.exists(h5_path):
@@ -147,7 +146,7 @@ def get_fnameset(dirpath):
 '''
 def apply_rotation(image, label):
     rotation_angle = random.randint(-8,8)
-    return rotate(image, rotation_angle), rotate(label, rotation_angle)
+    return rotate(image, rotation_angle), rotate(label, rotation_angle, mode="constant",cval=1.0)
 
 def apply_rescaling(image, label):
     rescale_ratio = 0.9 + random.random() * 0.2 # from 0.9 to 1.1
