@@ -3,8 +3,8 @@ import keras
 import tensorflow as tf
 
 from keras import models, backend, Model
-from keras.layers import Input, Conv2D, MaxPool2D, ZeroPadding2D
-from keras.layers import BatchNormalization, Flatten, Dense, Reshape
+from keras.layers import Input, Conv2D, MaxPool2D, ZeroPadding2D, MaxPooling2D, Conv2DTranspose
+from keras.layers import BatchNormalization, Flatten, Dense, Reshape, concatenate
 
 '''
     1000fps simple-seg net 모델
