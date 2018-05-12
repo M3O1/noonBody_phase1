@@ -52,20 +52,39 @@ def get_1000fps_model(input_size,filters=64):
     목표 ACC : 80%
     -> Dense-Net으로 바꾸면서 좀더 높은 ACC 기대
 '''
-def unet_convBlock(x, filters, block_name):
-    conv = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv1") (x)
-    conv = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv2") (conv)
+def unet_convBlock(x, filters, block_name,zero_padding=False):
+    if zero_padding:
+        x = ZeroPadding2D(padding=(1,1))(x)
+        conv = Conv2D(filters, (3, 3), activation='relu', padding="valid", name=block_name+"conv1") (x)
+    else:
+        conv = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv1") (x)
+    
+    if zero_padding:
+        conv = ZeroPadding2D(padding=(1,1))(conv)
+        conv = Conv2D(filters, (3, 3), activation='relu', padding="valid", name=block_name+"conv2") (conv)
+    else:
+        conv = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv2") (conv)
+    
     out = MaxPooling2D((2, 2), name=block_name+"pool") (conv)
     return conv, out
 
-def unet_upconvBlock(x, connect_layer, filters, block_name):
+def unet_upconvBlock(x, connect_layer, filters, block_name,zero_padding=False):
     upconv = Conv2DTranspose(filters, (2, 2), strides=(2, 2), padding='same', name=block_name+"upconv1") (x)
     concat = concatenate([upconv, connect_layer], axis=3, name=block_name+"concat")
-    out = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv1") (concat)
-    out = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv2") (out)
+    if zero_padding:
+        conv = ZeroPadding2D(padding=(1,1))(concat)
+        conv = Conv2D(filters, (3, 3), activation='relu', padding="valid", name=block_name+"conv1") (conv)
+    else:
+        conv = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv1") (concat)    
+    
+    if zero_padding:
+        conv = ZeroPadding2D(padding=(1,1))(conv)
+        out = Conv2D(filters, (3, 3), activation='relu', padding="valid", name=block_name+"conv2") (conv)
+    else:
+        out = Conv2D(filters, (3, 3), activation='relu', padding='same', name=block_name+"conv2") (conv)
     return out
 
-def get_basic_unet_model(input_size, depth =4, filters=8):
+def get_basic_unet_model(input_size, depth =4, filters=8, zero_padding=False):
     input_shape = (*input_size,3)
     x = Input(input_shape,name="input")
 
@@ -81,8 +100,17 @@ def get_basic_unet_model(input_size, depth =4, filters=8):
         filters*=2
 
     # Bottom part
-    p = Conv2D(filters, (3, 3), activation='relu', padding='same', name='mid-1') (p)
-    p = Conv2D(filters, (3, 3), activation='relu', padding='same', name='mid-2') (p)
+    if zero_padding:
+        p = ZeroPadding2D(padding=(1,1))(p)
+        p = Conv2D(filters, (3, 3), activation='relu', padding='valid', name='mid-1') (p)
+    else:
+        p = Conv2D(filters, (3, 3), activation='relu', padding='same', name='mid-1') (p)
+
+    if zero_padding:
+        p = ZeroPadding2D(padding=(1,1))(p)
+        p = Conv2D(filters, (3, 3), activation='relu', padding='valid', name='mid-2') (p)
+    else:
+        p = Conv2D(filters, (3, 3), activation='relu', padding='same', name='mid-2') (p)
 
     # Up part
     for i in range(depth-1,-1,-1):
